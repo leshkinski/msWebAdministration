@@ -8,9 +8,8 @@ function Get-TargetResource
         [System.String]
         $Website,
 
-        [parameter(Mandatory = $true)]
         [System.String]
-        $WebApplication,
+        $WebApplication = "/",
 
         [parameter(Mandatory = $true)]
         [System.String]
@@ -54,9 +53,8 @@ function Set-TargetResource
         [System.String]
         $Website,
 
-        [parameter(Mandatory = $true)]
         [System.String]
-        $WebApplication,
+        $WebApplication = "/",
 
         [parameter(Mandatory = $true)]
         [System.String]
@@ -65,6 +63,12 @@ function Set-TargetResource
         [parameter(Mandatory = $true)]
         [System.String]
         $PhysicalPath,
+
+        [System.Management.Automation.PSCredential]
+        $Credential,
+
+        [System.Boolean]
+        $Force = $false,
 
         [ValidateSet("Present","Absent")]
         [System.String]
@@ -79,12 +83,41 @@ function Set-TargetResource
         if ($virtualDirectory.count -eq 0)
         {
             Write-Verbose "Creating new Web Virtual Directory $Name."
-            New-WebVirtualDirectory -Site $Website -Application $WebApplication -Name $Name -PhysicalPath $PhysicalPath
+            if ($WebApplication -eq "/")
+            {
+                New-WebVirtualDirectory -Site $Website -Name $Name -PhysicalPath $PhysicalPath -Force:$Force
+                $WebAppPath = "\"
+            }
+            else 
+            {
+                New-WebVirtualDirectory -Site $Website -Application $WebApplication -Name $Name -PhysicalPath $PhysicalPath -Force:$Force
+                $WebAppPath = "\WebApplication\"
+            }
+            if ($Credential)
+            {
+                Set-ItemProperty -Path IIS:\Sites\$Website$WebAppPath$Name -Name userName -Value $Credential.Username
+                Set-ItemProperty -Path IIS:\Sites\$Website$WebAppPath$Name -Name password -Value $Credential.GetNetworkCredential().Password
+            }
         }
         else
         {
-            Write-Verbose "Updating physical path for web virtual directory $Name."
-            Set-ItemProperty -Path IIS:Sites\$Website\$WebApplication\$Name -Name physicalPath -Value $PhysicalPath
+            if ($virtualDirectory.physicalPath -ne $PhysicalPath)
+            {
+                Write-Verbose "Updating physical path for web virtual directory $Name."
+                Set-ItemProperty -Path IIS:Sites\$Website$WebAppPath$Name -Name physicalPath -Value $PhysicalPath
+            }
+            if ($virtualDirectory.userName -ne $Credential.Username)
+            {
+                Write-Verbose "Updating Username for web virtual directory $Name"
+                Set-ItemProperty -Path IIS:Sites\$Website$WebAppPath$Name -Name userName -Value $Credential.Username
+            }
+            if ($virtualDirectory.password -ne $Credential.GetNetworkCredential().Password)
+            {
+                Write-Verbose "Updating Password for web virtual directory $Name"
+                Set-ItemProperty -Path IIS:Sites\$Website$WebAppPath$Name -Name password -Value $Credential.GetNetworkCredential().Password
+            }
+
+
         }
     }
 
@@ -105,9 +138,8 @@ function Test-TargetResource
         [System.String]
         $Website,
 
-        [parameter(Mandatory = $true)]
         [System.String]
-        $WebApplication,
+        $WebApplication ="/",
 
         [parameter(Mandatory = $true)]
         [System.String]
@@ -116,6 +148,9 @@ function Test-TargetResource
         [parameter(Mandatory = $true)]
         [System.String]
         $PhysicalPath,
+
+        [System.Management.Automation.PSCredential]
+        $Credential,
 
         [ValidateSet("Present","Absent")]
         [System.String]
@@ -129,7 +164,9 @@ function Test-TargetResource
 
     if ($virtualDirectory.count -eq 1 -and $Ensure -eq "Present")
     {
-        if ($virtualDirectory.physicalPath -eq $PhysicalPath)
+        if ($virtualDirectory.physicalPath -eq $PhysicalPath -and
+            $virtualDirectory.userName -eq $Credential.Username -and
+            $virtualDirectory.password -eq $Credential.GetNetworkCredential().Password)
         {
             Write-Verbose "Web virtual directory is in required state"
             return $true
@@ -198,6 +235,12 @@ function CheckApplicationExists
         [System.String]
         $Application
     )
+
+    if ($Application -eq "/")
+    {
+        return $true
+    }
+
     $WebApplication = Get-WebApplication -Site $Site -Name $Application
 
     if ($WebApplication.count -eq 1)
@@ -223,8 +266,12 @@ function GetCompositeVirtualDirectoryName
         $Application
     )
 
+    if ($Application -eq "/")
+    {
+        return $Name
+    }
+
     return "$Application/$Name"
 }
 
 Export-ModuleMember -Function *-TargetResource
-
